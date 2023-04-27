@@ -3,7 +3,7 @@
 from openslides_backend.models import fields
 from openslides_backend.models.base import Model
 
-MODELS_YML_CHECKSUM = "80d7fc302612376567fed8973f83bc22"
+MODELS_YML_CHECKSUM = "e7b2e449cbf41620cfb26189db495095"
 
 
 class Organization(Model):
@@ -32,6 +32,9 @@ class Organization(Model):
             "description": "Maximum of active users for the whole organization. 0 means no limitation at all",
             "minimum": 0,
         },
+    )
+    default_language = fields.CharField(
+        required=True, constraints={"enum": ["en", "de", "it", "es", "ru", "cs"]}
     )
     committee_ids = fields.RelationListField(to={"committee": "organization_id"})
     active_meeting_ids = fields.RelationListField(
@@ -69,6 +72,7 @@ class User(Model):
 
     id = fields.IntegerField()
     username = fields.CharField(required=True)
+    saml_id = fields.CharField()
     pronoun = fields.CharField()
     title = fields.CharField()
     first_name = fields.CharField()
@@ -274,6 +278,10 @@ class Theme(Model):
     warn_a200 = fields.ColorField()
     warn_a400 = fields.ColorField()
     warn_a700 = fields.ColorField()
+    headbar = fields.ColorField()
+    yes = fields.ColorField()
+    no = fields.ColorField()
+    abstain = fields.ColorField()
     theme_for_organization_id = fields.RelationField(to={"organization": "theme_id"})
     organization_id = fields.OrganizationField(
         to={"organization": "theme_ids"}, required=True
@@ -341,6 +349,9 @@ class Meeting(Model):
     start_time = fields.TimestampField()
     end_time = fields.TimestampField()
     imported_at = fields.TimestampField()
+    language = fields.CharField(
+        read_only=True, constraints={"enum": ["en", "de", "it", "es", "ru", "cs"]}
+    )
     jitsi_domain = fields.CharField()
     jitsi_room_name = fields.CharField()
     jitsi_room_password = fields.CharField()
@@ -575,6 +586,9 @@ class Meeting(Model):
         default="fast", constraints={"enum": ["long", "fast"]}
     )
     poll_couple_countdown = fields.BooleanField(default=True)
+    topic_poll_default_group_ids = fields.RelationListField(
+        to={"group": "used_as_topic_poll_default_id"}
+    )
     projector_ids = fields.RelationListField(
         to={"projector": "meeting_id"}, on_delete=fields.OnDelete.CASCADE
     )
@@ -832,6 +846,9 @@ class Group(Model):
     )
     used_as_assignment_poll_default_id = fields.RelationField(
         to={"meeting": "assignment_poll_default_group_ids"}
+    )
+    used_as_topic_poll_default_id = fields.RelationField(
+        to={"meeting": "topic_poll_default_group_ids"}
     )
     used_as_poll_default_id = fields.RelationField(
         to={"meeting": "poll_default_group_ids"}
@@ -1785,7 +1802,7 @@ class Projector(Model):
     id = fields.IntegerField()
     name = fields.CharField()
     scale = fields.IntegerField(default=0)
-    scroll = fields.IntegerField(default=0)
+    scroll = fields.IntegerField(default=0, constraints={"minimum": 0})
     width = fields.IntegerField(default=1200, constraints={"minimum": 1})
     aspect_ratio_numerator = fields.IntegerField(default=16, constraints={"minimum": 1})
     aspect_ratio_denominator = fields.IntegerField(

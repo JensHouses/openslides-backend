@@ -111,6 +111,17 @@ organization:
     restriction_mode: B
     default: 0
     minimum: 0
+  default_language:
+    type: string
+    restriction_mode: A
+    enum:
+      - en
+      - de
+      - it
+      - es
+      - ru
+      - cs
+    required: true
 
   vote_decrypt_public_main_key:
     type: string
@@ -199,6 +210,9 @@ user:
   username:
     type: string
     required: true
+    restriction_mode: A
+  saml_id:
+    type: string
     restriction_mode: A
   pronoun:
     type: string
@@ -613,6 +627,18 @@ theme:
   warn_a700:
     restriction_mode: A
     type: color
+  headbar:
+    restriction_mode: A
+    type: color
+  "yes":
+    restriction_mode: A
+    type: color
+  "no":
+    restriction_mode: A
+    type: color
+  abstain:
+    restriction_mode: A
+    type: color
   theme_for_organization_id:
     restriction_mode: A
     to: organization/theme_id
@@ -732,6 +758,17 @@ meeting:
   imported_at:
     type: timestamp
     restriction_mode: B
+  language:
+    type: string
+    restriction_mode: A
+    enum:
+      - en
+      - de
+      - it
+      - es
+      - ru
+      - cs
+    read_only: true
 
   # Configuration (only for the server owner)
   jitsi_domain:
@@ -1358,6 +1395,12 @@ meeting:
     default: True
     restriction_mode: B
 
+  # Topic poll
+  topic_poll_default_group_ids:
+    type: relation-list
+    to: group/used_as_topic_poll_default_id
+    restriction_mode: B
+
   # Relations
   projector_ids:
     type: relation-list
@@ -1735,6 +1778,11 @@ group:
     to: meeting/assignment_poll_default_group_ids
     restriction_mode: A
     required: false
+  used_as_topic_poll_default_id:
+    type: relation
+    to: meeting/topic_poll_default_group_ids
+    restriction_mode: A
+    required: false
   used_as_poll_default_id:
     type: relation
     to: meeting/poll_default_group_ids
@@ -2051,7 +2099,7 @@ motion:
     restriction_mode: A
   number:
     type: string
-    restriction_mode: A
+    restriction_mode: C
   number_value:
     type: number
     description: The number value of this motion. This number is auto-generated and read-only.
@@ -2062,11 +2110,11 @@ motion:
     description: The (positive) serial number of this motion. This number is auto-generated and read-only.
     read_only: true
     required: true
-    restriction_mode: A
+    restriction_mode: C
   title:
     type: string
     required: true
-    restriction_mode: A
+    restriction_mode: C
   text:
     type: HTMLStrict
     restriction_mode: C
@@ -2086,7 +2134,7 @@ motion:
     restriction_mode: C
   state_extension:
     type: string
-    restriction_mode: A
+    restriction_mode: C
   recommendation_extension:
     type: string
     restriction_mode: C
@@ -2104,7 +2152,7 @@ motion:
     restriction_mode: C
   start_line_number:
     type: number
-    restriction_mode: A
+    restriction_mode: C
     minimum: 1
     default: 1
   forwarded:
@@ -3291,6 +3339,7 @@ projector:
   scroll:
     type: number
     default: 0
+    minimum: 0
     restriction_mode: A
   width:
     type: number
