@@ -207,6 +207,12 @@ user:
   id:
     type: number
     restriction_mode: A
+  tech_id:
+    type: number
+    restriction_mode: A
+  member_id:
+    type: number
+    restriction_mode: A
   username:
     type: string
     required: true
