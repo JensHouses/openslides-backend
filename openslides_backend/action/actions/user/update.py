@@ -30,6 +30,8 @@ class UserUpdate(
         optional_properties=[
             "username",
             "pronoun",
+            "tech_id",
+            "member_id",
             "title",
             "first_name",
             "last_name",

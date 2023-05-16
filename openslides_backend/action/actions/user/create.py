@@ -36,6 +36,8 @@ class UserCreate(
             "title",
             "username",
             "pronoun",
+            "tech_id",
+            "member_id",
             "first_name",
             "last_name",
             "is_active",

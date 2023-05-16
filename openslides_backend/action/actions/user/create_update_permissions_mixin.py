@@ -159,6 +159,8 @@ class CreateUpdatePermissionsMixin(UserScopeMixin, Action):
             "can_change_own_password",
             "gender",
             "pronoun",
+            "tech_id",
+            "member_id",
             "email",
             "default_number",
             "default_structure_level",

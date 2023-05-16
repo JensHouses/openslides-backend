@@ -29,6 +29,8 @@ class UserCreateSamlAccount(EmailCheckMixin, UsernameMixin, CreateAction):
             "email",
             "gender",
             "pronoun",
+            "tech_id",
+            "member_id",
             "is_active",
             "is_physical_person",
         ],
