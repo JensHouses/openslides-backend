@@ -207,6 +207,12 @@ user:
   id:
     type: number
     restriction_mode: A
+  tech_id:
+    type: string
+    restriction_mode: A
+  member_id:
+    type: string
+    restriction_mode: A
   username:
     type: string
     required: true
@@ -464,7 +470,7 @@ user:
 
 organization_tag:
   id:
-    type: number
+    type: string
     restriction_mode: A
   name:
     type: string

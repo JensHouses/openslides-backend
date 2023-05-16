@@ -71,6 +71,8 @@ class User(Model):
     verbose_name = "user"
 
     id = fields.IntegerField()
+    tech_id = fields.CharField()
+    member_id = fields.CharField()
     username = fields.CharField(required=True)
     saml_id = fields.CharField()
     pronoun = fields.CharField()
