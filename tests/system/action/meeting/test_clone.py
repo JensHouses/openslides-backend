@@ -802,7 +802,7 @@ class MeetingClone(BaseActionTestCase):
             "motion_poll_ballot_paper_selection": "NUMBER_OF_DELEGATES",
             "motion_poll_ballot_paper_number": 42,
             "motion_poll_default_type": "pseudoanonymous",
-            "motion_poll_default_100_percent_base": "YN",
+            "motion_poll_default_onehundred_percent_base": "YN",
             "users_enable_presence_view": True,
             "users_enable_vote_weight": True,
             "users_enable_vote_delegations": True,
@@ -825,7 +825,7 @@ class MeetingClone(BaseActionTestCase):
             "assignment_poll_sort_poll_result_by_votes": True,
             "assignment_poll_default_type": "pseudoanonymous",
             "assignment_poll_default_method": "YNA",
-            "assignment_poll_default_100_percent_base": "YNA",
+            "assignment_poll_default_onehundred_percent_base": "YNA",
         }
         self.update_model("meeting/1", settings)
         response = self.request("meeting.clone", {"meeting_id": 1})
@@ -910,13 +910,21 @@ class MeetingClone(BaseActionTestCase):
         response = self.request("meeting.clone", {"meeting_id": 1})
         self.assert_status_code(response, 200)
 
-    def test_meeting_name_too_long(self) -> None:
-        long_name = "0123456789" * 10
+    def test_meeting_name_exact_fit(self) -> None:
+        long_name = "A" * 93
         self.test_models["meeting/1"]["name"] = long_name
         self.set_models(self.test_models)
         response = self.request("meeting.clone", {"meeting_id": 1})
         self.assert_status_code(response, 200)
         self.assert_model_exists("meeting/2", {"name": long_name + " - Copy"})
+
+    def test_meeting_name_too_long(self) -> None:
+        long_name = "A" * 100
+        self.test_models["meeting/1"]["name"] = long_name
+        self.set_models(self.test_models)
+        response = self.request("meeting.clone", {"meeting_id": 1})
+        self.assert_status_code(response, 200)
+        self.assert_model_exists("meeting/2", {"name": "A" * 90 + "... - Copy"})
 
     def test_permissions_both_okay(self) -> None:
         self.set_models(self.test_models)
@@ -1080,10 +1088,13 @@ class MeetingClone(BaseActionTestCase):
         self.set_models(
             {
                 "committee/1": {"organization_id": 1, "meeting_ids": [1, 2]},
-                "meeting/1": {"motion_ids": [1], "list_of_speakers_ids": [1]},
+                "meeting/1": {
+                    "motion_ids": [1, 4],
+                    "motion_state_ids": [1],
+                    "list_of_speakers_ids": [1, 4],
+                },
                 "meeting/2": {
-                    "name": "forward target",
-                    "motion_ids": [2],
+                    "motion_ids": [2, 3],
                     "is_active_in_organization_id": 1,
                 },
                 "motion/1": {
@@ -1098,28 +1109,69 @@ class MeetingClone(BaseActionTestCase):
                 "motion/2": {
                     "meeting_id": 2,
                     "origin_id": 1,
+                    "origin_meeting_id": 1,
                     "all_origin_ids": [1],
                     "sequential_number": 1,
                     "list_of_speakers_id": 2,
                     "title": "motion1 forwarded",
                     "state_id": 2,
                 },
+                "motion/3": {
+                    "meeting_id": 2,
+                    "derived_motion_ids": [4],
+                    "all_derived_motion_ids": [4],
+                    "sequential_number": 2,
+                    "list_of_speakers_id": 3,
+                    "title": "motion3",
+                    "state_id": 2,
+                },
+                "motion/4": {
+                    "meeting_id": 1,
+                    "origin_id": 3,
+                    "origin_meeting_id": 2,
+                    "all_origin_ids": [3],
+                    "sequential_number": 1,
+                    "list_of_speakers_id": 4,
+                    "title": "motion3 forwarded",
+                    "state_id": 1,
+                },
                 "list_of_speakers/1": {
                     "sequential_number": 1,
                     "content_object_id": "motion/1",
-                    "closed": False,
                     "meeting_id": 1,
                 },
-                "motion_state/1": {"motion_ids": [1]},
+                "list_of_speakers/2": {
+                    "sequential_number": 1,
+                    "content_object_id": "motion/2",
+                    "meeting_id": 2,
+                },
+                "list_of_speakers/3": {
+                    "sequential_number": 2,
+                    "content_object_id": "motion/3",
+                    "meeting_id": 2,
+                },
+                "list_of_speakers/4": {
+                    "sequential_number": 2,
+                    "content_object_id": "motion/4",
+                    "meeting_id": 1,
+                },
+                "motion_state/1": {"motion_ids": [1, 4], "meeting_id": 1},
+                "motion_state/2": {"motion_ids": [2, 3], "meeting_id": 2},
             }
         )
         response = self.request("meeting.clone", {"meeting_id": 1})
         self.assert_status_code(response, 200)
         self.assert_model_exists(
-            "meeting/3", {"motion_ids": [3], "name": "Test - Copy"}
+            "meeting/3", {"motion_ids": [5, 6], "name": "Test - Copy"}
         )
         self.assert_model_exists(
-            "motion/3", {"meeting_id": 3, "origin_id": None, "derived_motion_ids": None}
+            "motion/5",
+            {
+                "meeting_id": 3,
+                "origin_id": None,
+                "origin_meeting_id": None,
+                "derived_motion_ids": None,
+            },
         )
 
     def test_clone_with_underscore_attributes(self) -> None:
@@ -1128,7 +1180,7 @@ class MeetingClone(BaseActionTestCase):
         response = self.request(
             "meeting.clone", {"meeting_id": 1, "_collection": "testtest"}
         )
-        self.assert_status_code(response, 200)
+        self.assert_status_code(response, 400)
 
     def test_clone_vote_delegation(self) -> None:
         self.test_models["meeting/1"]["user_ids"] = [1, 2]

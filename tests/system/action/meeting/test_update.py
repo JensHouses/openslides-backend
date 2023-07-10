@@ -189,7 +189,27 @@ class MeetingUpdateActionTest(BaseActionTestCase):
         _, response = self.basic_test({"reference_projector_id": 10}, check_200=False)
         self.assert_status_code(response, 400)
         self.assertIn(
-            "The following models do not belong to meeting 1: ['projector/10']",
+            "Model 'projector/10' does not exist.",
+            response.json["message"],
+        )
+
+    def test_update_reference_projector_to_internal_projector_error(self) -> None:
+        self.set_models(
+            {
+                "projector/2": {
+                    "name": "Projector 2",
+                    "is_internal": True,
+                    "meeting_id": 1,
+                },
+                "meeting/1": {
+                    "projector_ids": [1, 2],
+                },
+            }
+        )
+        _, response = self.basic_test({"reference_projector_id": 2}, check_200=False)
+        self.assert_status_code(response, 400)
+        self.assertIn(
+            "An internal projector cannot be set as reference projector.",
             response.json["message"],
         )
 
@@ -363,6 +383,42 @@ class MeetingUpdateActionTest(BaseActionTestCase):
             in response.json["message"]
         )
 
+    def test_update_enable_poo_categories_without_poo(self) -> None:
+        self.set_models(self.test_models)
+        response = self.request(
+            "meeting.update",
+            {
+                "id": 1,
+                "list_of_speakers_enable_point_of_order_categories": True,
+            },
+        )
+        self.assert_status_code(response, 400)
+        assert (
+            "You cannot enable point of order categories without enabling point of order speakers."
+            in response.json["message"]
+        )
+
+    def test_update_disable_poo_with_enabled_poo_categories(self) -> None:
+        self.test_models["meeting/1"][
+            "list_of_speakers_enable_point_of_order_speakers"
+        ] = True
+        self.test_models["meeting/1"][
+            "list_of_speakers_enable_point_of_order_categories"
+        ] = True
+        self.set_models(self.test_models)
+        response = self.request(
+            "meeting.update",
+            {
+                "id": 1,
+                "list_of_speakers_enable_point_of_order_speakers": False,
+            },
+        )
+        self.assert_status_code(response, 400)
+        assert (
+            "You cannot enable point of order categories without enabling point of order speakers."
+            in response.json["message"]
+        )
+
     def test_update_group_a_no_permissions(self) -> None:
         self.base_permission_test(
             self.test_models, "meeting.update", {"id": 1, "welcome_title": "Hallo"}
@@ -426,12 +482,16 @@ class MeetingUpdateActionTest(BaseActionTestCase):
             {
                 "id": 1,
                 "custom_translations": {"motion": "Antrag", "assignment": "Zuordnung"},
+                "external_id": "test",
             },
         )
         self.assert_status_code(response, 200)
         self.assert_model_exists(
             "meeting/1",
-            {"custom_translations": {"motion": "Antrag", "assignment": "Zuordnung"}},
+            {
+                "custom_translations": {"motion": "Antrag", "assignment": "Zuordnung"},
+                "external_id": "test",
+            },
         )
 
     def test_update_group_e_no_permission(self) -> None:
@@ -585,3 +645,38 @@ class MeetingUpdateActionTest(BaseActionTestCase):
             "It is not allowed to end jitsi_domain with '/'."
             in response.json["message"]
         )
+
+    def test_update_external_id_not_unique(self) -> None:
+        external_id = "external"
+        self.set_models(
+            {
+                "meeting/1": {"committee_id": 1, "external_id": external_id},
+                "meeting/2": {"committee_id": 1},
+            }
+        )
+        response = self.request(
+            "meeting.update",
+            {
+                "id": 2,
+                "external_id": external_id,
+            },
+        )
+        self.assert_status_code(response, 400)
+        self.assertIn(
+            "The external_id of the meeting is not unique in the committee scope.",
+            response.json["message"],
+        )
+
+    def test_update_external_id_self(self) -> None:
+        external_id = "external"
+        self.set_models(
+            {
+                "meeting/1": {
+                    "committee_id": 1,
+                    "external_id": external_id,
+                    "is_active_in_organization_id": 1,
+                },
+            }
+        )
+        response = self.request("meeting.update", {"id": 1, "external_id": external_id})
+        self.assert_status_code(response, 200)

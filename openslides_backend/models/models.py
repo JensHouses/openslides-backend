@@ -3,7 +3,7 @@
 from openslides_backend.models import fields
 from openslides_backend.models.base import Model
 
-MODELS_YML_CHECKSUM = "e7b2e449cbf41620cfb26189db495095"
+MODELS_YML_CHECKSUM = "821ae10bd2fcfbea44cd9493bc231220"
 
 
 class Organization(Model):
@@ -17,6 +17,7 @@ class Organization(Model):
     privacy_policy = fields.TextField()
     login_text = fields.TextField()
     reset_password_verbose_errors = fields.BooleanField()
+    genders = fields.CharArrayField(default=["male", "female", "diverse", "non-binary"])
     enable_electronic_voting = fields.BooleanField()
     enable_chat = fields.BooleanField()
     limit_of_meetings = fields.IntegerField(
@@ -36,6 +37,12 @@ class Organization(Model):
     default_language = fields.CharField(
         required=True, constraints={"enum": ["en", "de", "it", "es", "ru", "cs"]}
     )
+    saml_enabled = fields.BooleanField()
+    saml_login_button_text = fields.CharField(default="SAML login")
+    saml_attr_mapping = fields.JSONField()
+    saml_metadata_idp = fields.TextField()
+    saml_metadata_sp = fields.TextField()
+    saml_private_key = fields.CharField()
     committee_ids = fields.RelationListField(to={"committee": "organization_id"})
     active_meeting_ids = fields.RelationListField(
         to={"meeting": "is_active_in_organization_id"}
@@ -72,8 +79,13 @@ class User(Model):
 
     id = fields.IntegerField()
     username = fields.CharField(required=True)
-    saml_id = fields.CharField()
-    pronoun = fields.CharField()
+    saml_id = fields.CharField(
+        constraints={
+            "minLength": 1,
+            "description": "unique-key from IdP for SAML login",
+        }
+    )
+    pronoun = fields.CharField(constraints={"maxLength": 32})
     title = fields.CharField()
     first_name = fields.CharField()
     last_name = fields.CharField()
@@ -82,14 +94,14 @@ class User(Model):
     password = fields.CharField()
     default_password = fields.CharField()
     can_change_own_password = fields.BooleanField(default=True)
-    gender = fields.CharField(constraints={"enum": ["male", "female", "diverse"]})
+    gender = fields.CharField()
     email = fields.CharField()
     default_number = fields.CharField()
     default_structure_level = fields.CharField()
     default_vote_weight = fields.DecimalField(
         default="1.000000", constraints={"minimum": 0}
     )
-    last_email_send = fields.TimestampField()
+    last_email_sent = fields.TimestampField()
     is_demo_user = fields.BooleanField()
     last_login = fields.TimestampField(read_only=True)
     organization_management_level = fields.CharField(
@@ -295,6 +307,7 @@ class Committee(Model):
     id = fields.IntegerField()
     name = fields.CharField(required=True)
     description = fields.HTMLStrictField()
+    external_id = fields.CharField(constraints={"description": "unique"})
     meeting_ids = fields.RelationListField(
         to={"meeting": "committee_id"}, on_delete=fields.OnDelete.PROTECT
     )
@@ -331,9 +344,12 @@ class Meeting(Model):
     verbose_name = "meeting"
 
     id = fields.IntegerField()
+    external_id = fields.CharField(constraints={"description": "unique in committee"})
     welcome_title = fields.CharField(default="Welcome to OpenSlides")
     welcome_text = fields.HTMLPermissiveField(default="Space for your welcome text.")
-    name = fields.CharField(default="OpenSlides", constraints={"maxLength": 100})
+    name = fields.CharField(
+        required=True, default="OpenSlides", constraints={"maxLength": 100}
+    )
     is_active_in_organization_id = fields.RelationField(
         to={"organization": "active_meeting_ids"},
         constraints={"description": "Backrelation and boolean flag at once"},
@@ -438,6 +454,9 @@ class Meeting(Model):
     list_of_speakers_present_users_only = fields.BooleanField(default=False)
     list_of_speakers_show_first_contribution = fields.BooleanField(default=False)
     list_of_speakers_enable_point_of_order_speakers = fields.BooleanField(default=True)
+    list_of_speakers_enable_point_of_order_categories = fields.BooleanField(
+        default=False
+    )
     list_of_speakers_enable_pro_contra_speech = fields.BooleanField(default=False)
     list_of_speakers_can_set_contribution_self = fields.BooleanField(default=False)
     list_of_speakers_speaker_note_for_everyone = fields.BooleanField(default=True)
@@ -508,7 +527,7 @@ class Meeting(Model):
     )
     motion_poll_ballot_paper_number = fields.IntegerField(default=8)
     motion_poll_default_type = fields.CharField(default="pseudoanonymous")
-    motion_poll_default_100_percent_base = fields.CharField(default="YNA")
+    motion_poll_default_onehundred_percent_base = fields.CharField(default="YNA")
     motion_poll_default_group_ids = fields.RelationListField(
         to={"group": "used_as_motion_poll_default_id"}
     )
@@ -558,7 +577,7 @@ class Meeting(Model):
     assignment_poll_sort_poll_result_by_votes = fields.BooleanField(default=True)
     assignment_poll_default_type = fields.CharField(default="pseudoanonymous")
     assignment_poll_default_method = fields.CharField(default="Y")
-    assignment_poll_default_100_percent_base = fields.CharField(default="valid")
+    assignment_poll_default_onehundred_percent_base = fields.CharField(default="valid")
     assignment_poll_default_group_ids = fields.RelationListField(
         to={"group": "used_as_assignment_poll_default_id"}
     )
@@ -578,7 +597,7 @@ class Meeting(Model):
     poll_sort_poll_result_by_votes = fields.BooleanField()
     poll_default_type = fields.CharField(default="analog")
     poll_default_method = fields.CharField()
-    poll_default_100_percent_base = fields.CharField(default="YNA")
+    poll_default_onehundred_percent_base = fields.CharField(default="YNA")
     poll_default_group_ids = fields.RelationListField(
         to={"group": "used_as_poll_default_id"}
     )
@@ -609,6 +628,9 @@ class Meeting(Model):
     )
     list_of_speakers_ids = fields.RelationListField(
         to={"list_of_speakers": "meeting_id"}, on_delete=fields.OnDelete.CASCADE
+    )
+    point_of_order_category_ids = fields.RelationListField(
+        to={"point_of_order_category": "meeting_id"}, on_delete=fields.OnDelete.CASCADE
     )
     speaker_ids = fields.RelationListField(
         to={"speaker": "meeting_id"}, on_delete=fields.OnDelete.CASCADE
@@ -768,6 +790,7 @@ class Group(Model):
     verbose_name = "group"
 
     id = fields.IntegerField()
+    external_id = fields.CharField(constraints={"description": "unique in meeting"})
     name = fields.CharField(required=True)
     permissions = fields.CharArrayField(
         in_array_constraints={
@@ -984,6 +1007,21 @@ class ListOfSpeakers(Model):
     )
 
 
+class PointOfOrderCategory(Model):
+    collection = "point_of_order_category"
+    verbose_name = "point of order category"
+
+    id = fields.IntegerField()
+    text = fields.CharField(required=True)
+    rank = fields.IntegerField(required=True)
+    meeting_id = fields.RelationField(
+        to={"meeting": "point_of_order_category_ids"}, required=True
+    )
+    speaker_ids = fields.RelationListField(
+        to={"speaker": "point_of_order_category_id"}, equal_fields="meeting_id"
+    )
+
+
 class Speaker(Model):
     collection = "speaker"
     verbose_name = "speaker"
@@ -999,6 +1037,9 @@ class Speaker(Model):
     point_of_order = fields.BooleanField()
     list_of_speakers_id = fields.RelationField(
         to={"list_of_speakers": "speaker_ids"}, required=True, equal_fields="meeting_id"
+    )
+    point_of_order_category_id = fields.RelationField(
+        to={"point_of_order_category": "speaker_ids"}, equal_fields="meeting_id"
     )
     user_id = fields.RelationField(
         to={"user": "speaker_$_ids"}, required=True, equal_fields="meeting_id"
@@ -1081,8 +1122,9 @@ class Motion(Model):
     state_extension = fields.CharField()
     recommendation_extension = fields.CharField()
     sort_weight = fields.IntegerField(default=10000)
-    created = fields.TimestampField(read_only=True)
+    created = fields.TimestampField()
     last_modified = fields.TimestampField(read_only=True)
+    workflow_timestamp = fields.TimestampField(read_only=True)
     start_line_number = fields.IntegerField(default=1, constraints={"minimum": 1})
     forwarded = fields.TimestampField(read_only=True)
     lead_motion_id = fields.RelationField(
@@ -1382,7 +1424,7 @@ class MotionState(Model):
         constraints={"enum": ["do_not_merge", "undefined", "do_merge"]},
     )
     allow_motion_forwarding = fields.BooleanField()
-    set_created_timestamp = fields.BooleanField()
+    set_workflow_timestamp = fields.BooleanField()
     submitter_withdraw_state_id = fields.RelationField(
         to={"motion_state": "submitter_withdraw_back_ids"},
         equal_fields=["meeting_id", "workflow_id"],
@@ -1801,6 +1843,7 @@ class Projector(Model):
 
     id = fields.IntegerField()
     name = fields.CharField()
+    is_internal = fields.BooleanField(default=False)
     scale = fields.IntegerField(default=0)
     scroll = fields.IntegerField(default=0, constraints={"minimum": 0})
     width = fields.IntegerField(default=1200, constraints={"minimum": 1})

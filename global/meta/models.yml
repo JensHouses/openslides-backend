@@ -1,6 +1,6 @@
 ---
 # Types:
-#     - Nativ datatypes: string, text, number, boolean, JSON
+#     - Nativ datatypes: text, string (text with maxLength=256), number, boolean, JSON
 #     - HTMLStrict: A string with HTML content.
 #     - HTMLPermissive: A string with HTML content (with video tags).
 #     - float: Numbers that are expected to be non-integer. Formatted as in rfc7159.
@@ -91,6 +91,14 @@ organization:
   reset_password_verbose_errors:
     type: boolean
     restriction_mode: B
+  genders:
+    type: string[]
+    default:
+      - male
+      - female
+      - diverse
+      - non-binary
+    restriction_mode: A
 
   # Configuration (only for the server owner)
   enable_electronic_voting:
@@ -122,6 +130,27 @@ organization:
       - ru
       - cs
     required: true
+
+  # Saml settings
+  saml_enabled:
+    type: boolean
+    restriction_mode: A
+  saml_login_button_text:
+    type: string
+    default: SAML login
+    restriction_mode: A
+  saml_attr_mapping:
+    type: JSON
+    restriction_mode: A
+  saml_metadata_idp:
+    type: text
+    restriction_mode: A
+  saml_metadata_sp:
+    type: text
+    restriction_mode: A
+  saml_private_key:
+    type: string
+    restriction_mode: A
 
   vote_decrypt_public_main_key:
     type: string
@@ -219,9 +248,12 @@ user:
     restriction_mode: A
   saml_id:
     type: string
+    minLength: 1
     restriction_mode: A
+    description: unique-key from IdP for SAML login
   pronoun:
     type: string
+    maxLength: 32
     restriction_mode: A
   title:
     type: string
@@ -251,10 +283,6 @@ user:
     restriction_mode: D
   gender:
     type: string
-    enum:
-      - male
-      - female
-      - diverse
     restriction_mode: A
   email:
     type: string
@@ -270,7 +298,7 @@ user:
     default: "1.000000"
     minimum: 0
     restriction_mode: A
-  last_email_send:
+  last_email_sent:
     type: timestamp
     restriction_mode: D
   is_demo_user:
@@ -666,7 +694,10 @@ committee:
   description:
     type: HTMLStrict
     restriction_mode: A
-
+  external_id:
+    type: string
+    restriction_mode: A
+    description: unique
   meeting_ids:
     type: relation-list
     to: meeting/committee_id
@@ -720,6 +751,10 @@ meeting:
   id:
     type: number
     restriction_mode: A
+  external_id:
+    type: string
+    restriction_mode: A
+    description: unique in committee
   welcome_title:
     type: string
     default: Welcome to OpenSlides
@@ -735,6 +770,7 @@ meeting:
     maxLength: 100
     default: OpenSlides
     restriction_mode: A
+    required: true
   is_active_in_organization_id:
     type: relation
     to: organization/active_meeting_ids
@@ -1017,6 +1053,10 @@ meeting:
     type: boolean
     default: True
     restriction_mode: B
+  list_of_speakers_enable_point_of_order_categories:
+    type: boolean
+    default: False
+    restriction_mode: B
   list_of_speakers_enable_pro_contra_speech:
     type: boolean
     default: False
@@ -1207,7 +1247,7 @@ meeting:
     type: string
     default: pseudoanonymous
     restriction_mode: B
-  motion_poll_default_100_percent_base:
+  motion_poll_default_onehundred_percent_base:
     type: string
     default: YNA
     restriction_mode: B
@@ -1344,7 +1384,7 @@ meeting:
     type: string
     default: Y
     restriction_mode: B
-  assignment_poll_default_100_percent_base:
+  assignment_poll_default_onehundred_percent_base:
     type: string
     default: valid
     restriction_mode: B
@@ -1381,7 +1421,7 @@ meeting:
   poll_default_method:
     type: string
     restriction_mode: B
-  poll_default_100_percent_base:
+  poll_default_onehundred_percent_base:
     type: string
     default: YNA
     restriction_mode: B
@@ -1441,6 +1481,11 @@ meeting:
   list_of_speakers_ids:
     type: relation-list
     to: list_of_speakers/meeting_id
+    on_delete: CASCADE
+    restriction_mode: B
+  point_of_order_category_ids:
+    type: relation-list
+    to: point_of_order_category/meeting_id
     on_delete: CASCADE
     restriction_mode: B
   speaker_ids:
@@ -1674,6 +1719,10 @@ group:
   id:
     type: number
     restriction_mode: A
+  external_id:
+    type: string
+    restriction_mode: A
+    description: unique in meeting
   name:
     type: string
     required: true
@@ -1990,6 +2039,29 @@ list_of_speakers:
     required: true
     restriction_mode: A
 
+point_of_order_category:
+  id:
+    type: number
+    restriction_mode: A
+  text:
+    type: string
+    required: true
+    restriction_mode: A
+  rank:
+    type: number
+    required: true
+    restriction_mode: A
+  meeting_id:
+    type: relation
+    to: meeting/point_of_order_category_ids
+    required: true
+    restriction_mode: A
+  speaker_ids:
+    type: relation-list
+    to: speaker/point_of_order_category_id
+    equal_fields: meeting_id
+    restriction_mode: A
+
 speaker:
   id:
     type: number
@@ -2025,6 +2097,11 @@ speaker:
     type: relation
     to: list_of_speakers/speaker_ids
     required: true
+    equal_fields: meeting_id
+    restriction_mode: A
+  point_of_order_category_id:
+    type: relation
+    to: point_of_order_category/speaker_ids
     equal_fields: meeting_id
     restriction_mode: A
   user_id:
@@ -2150,9 +2227,12 @@ motion:
     restriction_mode: C
   created:
     type: timestamp
-    read_only: true
     restriction_mode: C
   last_modified:
+    type: timestamp
+    read_only: true
+    restriction_mode: C
+  workflow_timestamp:
     type: timestamp
     read_only: true
     restriction_mode: C
@@ -2656,7 +2736,7 @@ motion_state:
   allow_motion_forwarding:
     type: boolean
     restriction_mode: A
-  set_created_timestamp:
+  set_workflow_timestamp:
     type: boolean
     restriction_mode: A
   submitter_withdraw_state_id:
@@ -3337,6 +3417,10 @@ projector:
     restriction_mode: A
   name:
     type: string
+    restriction_mode: A
+  is_internal:
+    type: boolean
+    default: false
     restriction_mode: A
   scale:
     type: number
