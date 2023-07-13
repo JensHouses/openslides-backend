@@ -237,10 +237,10 @@ user:
     type: number
     restriction_mode: A
   tech_id:
-    type: number
+    type: string
     restriction_mode: A
   member_id:
-    type: number
+    type: string
     restriction_mode: A
   username:
     type: string

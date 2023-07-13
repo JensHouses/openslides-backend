@@ -93,6 +93,8 @@ class User(Model):
     is_physical_person = fields.BooleanField(default=True)
     password = fields.CharField()
     default_password = fields.CharField()
+    tech_id = fields.CharField()
+    member_id = fields.CharField()
     can_change_own_password = fields.BooleanField(default=True)
     gender = fields.CharField()
     email = fields.CharField()
