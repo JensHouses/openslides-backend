@@ -41,6 +41,8 @@ class UserUpdate(
             "is_active",
             "is_physical_person",
             "default_password",
+            "tech_id",
+            "member_id",
             "can_change_own_password",
             "gender",
             "email",
