@@ -164,6 +164,8 @@ class CreateUpdatePermissionsMixin(UserScopeMixin, Action):
             "default_structure_level",
             "default_vote_weight",
             "presence",
+            "tech_id",
+            "member_id"
         ],
         "B": [
             "number_$",
