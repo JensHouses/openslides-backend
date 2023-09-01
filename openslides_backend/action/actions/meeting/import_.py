@@ -1,8 +1,9 @@
 import re
 import time
 from collections import OrderedDict, defaultdict
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+from openslides_backend.action.actions.meeting.mixins import MeetingPermissionMixin
 from openslides_backend.migrations import get_backend_migration_index
 from openslides_backend.migrations.migration_wrapper import MigrationWrapperMemory
 from openslides_backend.models.base import model_registry
@@ -10,21 +11,12 @@ from openslides_backend.models.checker import Checker, CheckException
 from openslides_backend.models.fields import (
     BaseGenericRelationField,
     BaseRelationField,
-    BaseTemplateField,
     GenericRelationField,
     GenericRelationListField,
     RelationField,
     RelationListField,
-    TemplateCharField,
-    TemplateDecimalField,
-    TemplateHTMLStrictField,
-    TemplateRelationField,
 )
-from openslides_backend.models.models import Meeting, User
-from openslides_backend.permissions.management_levels import CommitteeManagementLevel
-from openslides_backend.permissions.permission_helper import (
-    has_committee_management_level,
-)
+from openslides_backend.models.models import Meeting
 from openslides_backend.services.datastore.interface import GetManyRequest
 from openslides_backend.shared.exceptions import ActionException, MissingPermission
 from openslides_backend.shared.filters import FilterOperator, Or
@@ -39,19 +31,26 @@ from openslides_backend.shared.schema import models_map_object
 from openslides_backend.shared.util import ONE_ORGANIZATION_FQID
 
 from ....shared.interfaces.event import Event, ListFields
-from ....shared.util import ONE_ORGANIZATION_ID
+from ....shared.util import ALLOWED_HTML_TAGS_STRICT, ONE_ORGANIZATION_ID, validate_html
 from ...action import RelationUpdates
 from ...mixins.singular_action_mixin import SingularActionMixin
 from ...util.crypto import get_random_password
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
 from ...util.typing import ActionData, ActionResultElement, ActionResults
+from ..meeting_user.helper_mixin import MeetingUserHelperMixin
 from ..motion.update import EXTENSION_REFERENCE_IDS_PATTERN
 from ..user.user_mixin import LimitOfUserMixin, UsernameMixin
 
 
 @register_action("meeting.import")
-class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
+class MeetingImport(
+    SingularActionMixin,
+    LimitOfUserMixin,
+    UsernameMixin,
+    MeetingUserHelperMixin,
+    MeetingPermissionMixin,
+):
     """
     Action to import a meeting.
     """
@@ -124,17 +123,11 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
             ),
         ]
         if self.user_id:
-            cml_fields = [
-                f"committee_${management_level}_management_level"
-                for management_level in cast(
-                    List[str], User.committee__management_level.replacement_enum
-                )
-            ]
             requests.append(
                 GetManyRequest(
                     "user",
                     [self.user_id],
-                    ["group_$_ids", "committee_ids", *cml_fields],
+                    ["committee_ids", "committee_management_ids"],
                 ),
             )
         self.datastore.get_many(requests, use_changed_models=False)
@@ -153,15 +146,11 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
 
     def remove_not_allowed_fields(self, instance: Dict[str, Any]) -> None:
         json_data = instance["meeting"]
-        regex_cml = re.compile(r"^committee_\$(\D)*_management_level$")
 
         for user in json_data.get("user", {}).values():
             user.pop("organization_management_level", None)
             user.pop("committee_ids", None)
-            for key in list(user.keys()):
-                if regex_cml.search(key):
-                    del user[key]
-
+            user.pop("committee_management_ids", None)
         self.get_meeting_from_json(json_data).pop("organization_tag_ids", None)
         json_data.pop("action_worker", None)
 
@@ -183,16 +172,18 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
             if blob := entry.pop("blob", None):
                 self.mediadata.append((blob, entry["id"], entry["mimetype"]))
 
+        # remove None values from amendment paragraph, os3 exports have those.
+        # and validate the html.
         for entry in meeting_json.get("motion", {}).values():
-            to_remove = set()
-            for paragraph in entry.get("amendment_paragraph_$") or []:
-                if (entry.get(fname := "amendment_paragraph_$" + paragraph)) is None:
-                    to_remove.add(paragraph)
-                    entry.pop(fname, None)
-            if to_remove:
-                entry["amendment_paragraph_$"] = list(
-                    set(entry["amendment_paragraph_$"]) - to_remove
-                )
+            if "amendment_paragraphs" in entry and isinstance(
+                entry["amendment_paragraphs"], dict
+            ):
+                res = {}
+                for key, html in entry["amendment_paragraphs"].items():
+                    if html is None:
+                        continue
+                    res[key] = validate_html(html, ALLOWED_HTML_TAGS_STRICT)
+                entry["amendment_paragraphs"] = res
 
         # check datavalidation
         checker = Checker(
@@ -435,22 +426,7 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
                     replace_fn, entry[field]
                 )
         else:
-            if (
-                isinstance(model_field, BaseTemplateField)
-                and model_field.is_template_field(field)
-                and model_field.replacement_collection
-            ):
-                entry[field] = [
-                    str(self.replace_map[model_field.replacement_collection][int(id_)])
-                    for id_ in entry[field]
-                ]
-            elif (
-                isinstance(model_field, BaseTemplateField)
-                and model_field.is_template_field(field)
-                and not model_field.replacement_collection
-            ):
-                pass
-            elif isinstance(model_field, RelationField):
+            if isinstance(model_field, RelationField):
                 target_collection = model_field.get_target_collection()
                 if entry[field]:
                     entry[field] = self.replace_map[target_collection][entry[field]]
@@ -474,20 +450,9 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
                         name + KEYSEPARATOR + str(self.replace_map[name][int(id_)])
                     )
                 entry[field] = new_fqid_list
-            if (
-                isinstance(model_field, BaseTemplateField)
-                and model_field.replacement_collection
-                and not model_field.is_template_field(field)
-            ):
-                replacement = model_field.get_replacement(field)
-                id_ = int(replacement)
-                new_id_ = self.replace_map[model_field.replacement_collection][id_]
-                new_field = model_field.get_structured_field_name(new_id_)
-                tmp = entry[field]
-                del entry[field]
-                entry[new_field] = tmp
 
     def update_admin_group(self, data_json: Dict[str, Any]) -> None:
+        """adds the request user to the admin group of the imported meeting"""
         meeting = self.get_meeting_from_json(data_json)
         admin_group_id = meeting.get("admin_group_id")
         group = data_json.get("group", {}).get(str(admin_group_id))
@@ -495,12 +460,55 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
             raise ActionException(
                 "Imported meeting has no AdminGroup to assign to request user"
             )
-        if group.get("user_ids"):
-            if self.user_id not in group["user_ids"]:
-                group["user_ids"].insert(0, self.user_id)
-        else:
-            group["user_ids"] = [self.user_id]
-        self.new_group_for_request_user = admin_group_id
+        new_meeting_user_id: Optional[int] = None
+        for meeting_user_id, meeting_user in data_json["meeting_user"].items():
+            if meeting_user.get("user_id") == self.user_id:
+                new_meeting_user_id = int(meeting_user_id)
+                if new_meeting_user_id not in (group.get("meeting_user_ids", {}) or {}):
+                    data_json["meeting_user"][meeting_user_id]["group_ids"] = (
+                        data_json["meeting_user"][meeting_user_id].get("group_ids")
+                        or []
+                    ) + [admin_group_id]
+                break
+        if not new_meeting_user_id:
+            new_meeting_user_id = self.datastore.reserve_id("meeting_user")
+            data_json["meeting_user"][str(new_meeting_user_id)] = {
+                "id": new_meeting_user_id,
+                "meeting_id": meeting["id"],
+                "user_id": self.user_id,
+                "group_ids": [admin_group_id],
+                "meta_new": True,
+            }
+            meeting["meeting_user_ids"].append(new_meeting_user_id)
+            request_user = self.datastore.get(
+                fqid_user := fqid_from_collection_and_id("user", self.user_id),
+                ["id", "meeting_user_ids", "committee_management_ids", "committee_ids"],
+            )
+            request_user.pop("meta_position", None)
+            request_user["meeting_user_ids"] = (
+                request_user.get("meeting_user_ids") or []
+            ) + [new_meeting_user_id]
+            data_json["user"][str(self.user_id)] = request_user
+            self.replace_map["user"].update(
+                {0: self.user_id}
+            )  # create a user.update event
+            self.replace_map["meeting_user"].update(
+                {0: new_meeting_user_id}
+            )  # create a meeting_user.update event
+            self.datastore.apply_changed_model(fqid_user, request_user)
+            self.datastore.apply_changed_model(
+                fqid_from_collection_and_id("meeting_user", new_meeting_user_id),
+                data_json["meeting_user"][str(new_meeting_user_id)],
+            )
+        if new_meeting_user_id not in (
+            meeting_user_ids := data_json["group"][str(admin_group_id)].get(
+                "meeting_user_ids", []
+            )
+        ):
+            meeting_user_ids.append(new_meeting_user_id)
+            data_json["group"][str(admin_group_id)][
+                "meeting_user_ids"
+            ] = meeting_user_ids
 
     def upload_mediadata(self) -> None:
         for blob, id_, mimetype in self.mediadata:
@@ -518,9 +526,9 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
         update_events = []
         for collection in json_data:
             for entry in json_data[collection].values():
+                fqid = fqid_from_collection_and_id(collection, entry["id"])
                 meta_new = entry.pop("meta_new", None)
                 if meta_new:
-                    fqid = fqid_from_collection_and_id(collection, entry["id"])
                     events.append(
                         self.build_event(
                             EventType.Create,
@@ -528,37 +536,13 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
                             entry,
                         )
                     )
-                elif (
-                    collection == "user" and entry["id"] in self.merge_user_map.values()
-                ):
+                elif collection == "user":
                     list_fields: ListFields = {"add": {}, "remove": {}}
                     fields: Dict[str, Any] = {}
                     for field, value in entry.items():
                         model_field = model_registry[collection]().try_get_field(field)
-                        if (
-                            isinstance(model_field, BaseTemplateField)
-                            and model_field.replacement_collection
-                            and isinstance(model_field, RelationListField)
-                        ):
+                        if isinstance(model_field, RelationListField):
                             list_fields["add"][field] = value
-                        elif isinstance(model_field, BaseTemplateField) and isinstance(
-                            model_field,
-                            (
-                                TemplateHTMLStrictField,
-                                TemplateCharField,
-                                TemplateDecimalField,
-                                TemplateRelationField,
-                            ),
-                        ):
-                            if model_field.is_template_field(field):
-                                list_fields["add"][field] = value
-                            else:
-                                fields[field] = value
-                        elif isinstance(model_field, RelationListField):
-                            list_fields["add"][field] = value
-                        elif isinstance(model_field, RelationField):
-                            fields[field] = value
-                    fqid = fqid_from_collection_and_id(collection, entry["id"])
                     if fields or list_fields["add"]:
                         update_events.append(
                             self.build_event(
@@ -568,6 +552,14 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
                                 list_fields=list_fields if list_fields["add"] else None,
                             )
                         )
+                elif collection == "meeting_user":
+                    update_events.append(
+                        self.build_event(
+                            EventType.Update,
+                            fqid,
+                            fields=entry,
+                        )
+                    )
 
         if pure_create_events:
             return events
@@ -610,32 +602,6 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
     def append_extra_events(
         self, events: List[Event], json_data: Dict[str, Any]
     ) -> None:
-        meeting = self.get_meeting_from_json(json_data)
-        meeting_id = meeting["id"]
-
-        # add request user to admin group of imported meeting.
-        # Request user is added to group in meeting to organization/active_meeting_ids if not archived
-        if (
-            meeting.get("is_active_in_organization_id")
-            and hasattr(self, "new_group_for_request_user")
-            and self.new_group_for_request_user
-        ):
-            events.append(
-                self.build_event(
-                    EventType.Update,
-                    fqid_from_collection_and_id("user", self.user_id),
-                    list_fields={
-                        "add": {
-                            "group_$_ids": [str(meeting_id)],
-                            f"group_${meeting_id}_ids": [
-                                self.new_group_for_request_user
-                            ],
-                        },
-                        "remove": {},
-                    },
-                )
-            )
-
         # add new users to the organization.user_ids
         new_user_ids = []
         for user_entry in json_data.get("user", {}).values():
@@ -697,15 +663,6 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
             result["number_of_merged_users"] = self.number_of_merged_users
         return result
 
-    def check_permissions(self, instance: Dict[str, Any]) -> None:
-        if not has_committee_management_level(
-            self.datastore,
-            self.user_id,
-            CommitteeManagementLevel.CAN_MANAGE,
-            instance["committee_id"],
-        ):
-            raise MissingPermission(CommitteeManagementLevel.CAN_MANAGE)
-
     def migrate_data(self, instance: Dict[str, Any]) -> Dict[str, Any]:
         """
         1. Check for valid migration index
@@ -727,6 +684,7 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
             organization = self.datastore.get(
                 ONE_ORGANIZATION_FQID,
                 [
+                    "id",
                     "committee_ids",
                     "active_meeting_ids",
                     "archived_meeting_ids",
@@ -740,7 +698,7 @@ class MeetingImport(SingularActionMixin, LimitOfUserMixin, UsernameMixin):
             )
             committee = self.datastore.get(
                 committee_fqid,
-                ["meeting_ids"],
+                ["id", "meeting_ids"],
                 lock_result=False,
             )
 

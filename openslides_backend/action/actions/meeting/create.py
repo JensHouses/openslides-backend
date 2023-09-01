@@ -1,8 +1,5 @@
-from typing import Any, Dict, List, Type, cast
+from typing import Any, Dict, List, Type
 
-from openslides_backend.action.mixins.check_unique_name_mixin import (
-    CheckUniqueInContextMixin,
-)
 from openslides_backend.models.models import Meeting
 
 from ....i18n.translator import Translator
@@ -16,19 +13,18 @@ from ...mixins.create_action_with_dependencies import CreateActionWithDependenci
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
 from ..group.create import GroupCreate
+from ..meeting_user.create import MeetingUserCreate
 from ..motion_workflow.create import (
     MotionWorkflowCreateComplexWorkflowAction,
     MotionWorkflowCreateSimpleWorkflowAction,
 )
 from ..projector.create import ProjectorCreateAction
 from ..projector_countdown.create import ProjectorCountdownCreate
-from ..user.update import UserUpdate
 from .mixins import MeetingCheckTimesMixin, MeetingPermissionMixin
 
 
 @register_action("meeting.create")
 class MeetingCreate(
-    CheckUniqueInContextMixin,
     CreateActionWithDependencies,
     MeetingPermissionMixin,
     MeetingCheckTimesMixin,
@@ -73,18 +69,6 @@ class MeetingCreate(
         "users_email_subject",
         "users_email_body",
     ]
-
-    def validate_instance(self, instance: Dict[str, Any]) -> None:
-        super().validate_instance(instance)
-        if instance.get("external_id"):
-            self.check_unique_in_context(
-                "external_id",
-                instance["external_id"],
-                "The external_id of the meeting is not unique in the committee scope.",
-                None,
-                "committee_id",
-                instance["committee_id"],
-            )
 
     def update_instance(self, instance: Dict[str, Any]) -> Dict[str, Any]:
         Translator.set_translation_language(instance["language"])
@@ -206,29 +190,26 @@ class MeetingCreate(
         if admin_ids := instance.pop("admin_ids", []):
             action_data = [
                 {
-                    "id": user_id,
-                    "group_$_ids": {
-                        str(instance["id"]): [id_from_fqid(fqid_admin_group)]
-                    },
+                    "meeting_id": instance["id"],
+                    "user_id": user_id,
+                    "group_ids": [id_from_fqid(fqid_admin_group)],
                 }
                 for user_id in admin_ids
             ]
-            self.execute_other_action(UserUpdate, action_data)
+            self.execute_other_action(MeetingUserCreate, action_data)
 
         # Add users to default group
         if user_ids := instance.pop("user_ids", []):
             action_data = [
                 {
-                    "id": user_id,
-                    "group_$_ids": {
-                        str(instance["id"]): [id_from_fqid(fqid_default_group)]
-                    },
+                    "meeting_id": instance["id"],
+                    "user_id": user_id,
+                    "group_ids": [id_from_fqid(fqid_default_group)],
                 }
                 for user_id in user_ids
                 if user_id not in admin_ids
             ]
-
-            self.execute_other_action(UserUpdate, action_data)
+            self.execute_other_action(MeetingUserCreate, action_data)
         self.apply_instance(instance)
 
         action_data_countdowns = [
@@ -276,11 +257,9 @@ class MeetingCreate(
                     "name": _("Default projector"),
                     "meeting_id": instance["id"],
                     "used_as_reference_projector_meeting_id": instance["id"],
-                    "used_as_default_$_in_meeting_id": {
-                        name: instance["id"]
-                        for name in cast(
-                            List[str], Meeting.default_projector__ids.replacement_enum
-                        )
+                    **{
+                        field: instance["id"]
+                        for field in Meeting.reverse_default_projectors()
                     },
                 }
             ]
